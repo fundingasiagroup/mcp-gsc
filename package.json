@@ -1,0 +1,15 @@
+{
+  "name": "mcp-gsc",
+  "version": "1.0.0",
+  "description": "Google Search Console MCP server for Cloudflare Containers",
+  "main": "worker.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["mcp", "google-search-console", "cloudflare"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@cloudflare/containers": "^0.2.2"
+  }
+}

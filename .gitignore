@@ -55,3 +55,20 @@ site/
 FORK_ANALYSIS.md
 MCP_LEARNINGS.md
 fork-review.html
+
+# Cloudflare Wrangler
+.wrangler/
+.dev.vars
+node_modules/
+
+# Service account keys
+*-service-account.json
+*_service_account.json
+client_secrets.json
+sa-*.json
+gsc-*.json
+
+# Cloudflare dev token (never commit)
+.dev.vars
+
+wrangler.json

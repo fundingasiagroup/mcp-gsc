@@ -400,12 +400,12 @@ The standard setup runs the server locally. This section is only for users who w
 ### HTTP Transport
 
 ```bash
-MCP_TRANSPORT=sse MCP_HOST=0.0.0.0 MCP_PORT=3001 python gsc_server.py
+MCP_TRANSPORT=streamable-http MCP_HOST=0.0.0.0 MCP_PORT=3001 python gsc_server.py
 ```
 
 | Variable | Default | Description |
 |---|---|---|
-| `MCP_TRANSPORT` | `stdio` | Set to `sse` for network/remote use |
+| `MCP_TRANSPORT` | `stdio` | `stdio`, `sse`, or `streamable-http` for network/remote use |
 | `MCP_HOST` | `127.0.0.1` | Host to bind |
 | `MCP_PORT` | `3001` | Port to bind |
 
@@ -415,7 +415,7 @@ MCP_TRANSPORT=sse MCP_HOST=0.0.0.0 MCP_PORT=3001 python gsc_server.py
 docker build -t mcp-gsc .
 
 docker run \
-  -e MCP_TRANSPORT=sse \
+  -e MCP_TRANSPORT=streamable-http \
   -e MCP_HOST=0.0.0.0 \
   -e MCP_PORT=3001 \
   -e GSC_CREDENTIALS_PATH=/app/credentials.json \

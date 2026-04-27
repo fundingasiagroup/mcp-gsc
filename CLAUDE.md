@@ -27,9 +27,9 @@ Set `GSC_SKIP_OAUTH=true` to force service account mode and skip OAuth entirely.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MCP_TRANSPORT` | `stdio` | Set to `sse` for remote/Docker/network use |
-| `MCP_HOST` | `127.0.0.1` | Host to bind when `MCP_TRANSPORT=sse` |
-| `MCP_PORT` | `3001` | Port to bind when `MCP_TRANSPORT=sse` |
+| `MCP_TRANSPORT` | `stdio` | `stdio`, `sse`, or `streamable-http` (use `streamable-http` for Cloudflare/remote) |
+| `MCP_HOST` | `127.0.0.1` | Host to bind when using `sse` or `streamable-http` |
+| `MCP_PORT` | `3001` | Port to bind when using `sse` or `streamable-http` |
 | `GSC_DATA_STATE` | `all` | `all` = matches GSC dashboard; `final` = confirmed data only (2–3 day lag) |
 | `GSC_ALLOW_DESTRUCTIVE` | `false` | Set `true` to enable `add_site`, `delete_site`, `delete_sitemap` |
 | `GSC_CREDENTIALS_PATH` | — | Path to service account JSON key file |
@@ -69,7 +69,7 @@ No credentials needed — all Google API calls are mocked with `unittest.mock`.
 
 ```bash
 docker build -t mcp-gsc .
-docker run -e MCP_TRANSPORT=sse -e MCP_PORT=3001 \
+docker run -e MCP_TRANSPORT=streamable-http -e MCP_PORT=3001 \
   -v /path/to/client_secrets.json:/app/client_secrets.json \
   -p 3001:3001 mcp-gsc
 ```

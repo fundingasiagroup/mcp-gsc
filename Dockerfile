@@ -5,8 +5,17 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 RUN uv sync --no-cache --no-install-project
 
-# Copy application code
+# Copy application code and entrypoint
 COPY gsc_server.py .
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
-# Default to stdio transport; override with MCP_TRANSPORT=sse for remote/network use
-CMD ["uv", "run", "--no-sync", "python", "gsc_server.py"]
+# For Cloudflare Containers: streamable-http transport, bind to all interfaces
+ENV MCP_TRANSPORT=streamable-http
+ENV MCP_HOST=0.0.0.0
+ENV MCP_PORT=3001
+
+EXPOSE 3001
+
+# Entrypoint handles credential injection from Cloudflare Secrets at startup
+ENTRYPOINT ["./entrypoint.sh"]

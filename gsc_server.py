@@ -22,6 +22,7 @@ logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
 
 # MCP
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 mcp = FastMCP("gsc-server")
 
@@ -40,6 +41,21 @@ def _expand_path(path: Optional[str]) -> Optional[str]:
 # First check if GSC_CREDENTIALS_PATH environment variable is set
 # Then try looking in the script directory and current working directory as fallbacks
 GSC_CREDENTIALS_PATH = _expand_path(os.environ.get("GSC_CREDENTIALS_PATH"))
+
+# If GSC_CREDENTIALS_JSON env var is set (Cloudflare Secrets pattern),
+# write it to a temp file and use that as the credentials path.
+# This is the primary auth path for Docker/Cloudflare containers.
+# entrypoint.sh also does this, but handling it here makes the server
+# robust even when run directly without the entrypoint wrapper.
+_gsc_credentials_json = os.environ.get("GSC_CREDENTIALS_JSON", "").strip()
+if _gsc_credentials_json and not GSC_CREDENTIALS_PATH:
+    import tempfile as _tempfile
+    _cred_dir = _tempfile.mkdtemp(prefix="gsc-creds-")
+    _cred_file = os.path.join(_cred_dir, "service_account.json")
+    with open(_cred_file, "w") as _f:
+        _f.write(_gsc_credentials_json)
+    GSC_CREDENTIALS_PATH = _cred_file
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 POSSIBLE_CREDENTIAL_PATHS = [
     GSC_CREDENTIALS_PATH,  # First try the environment variable if set
@@ -90,6 +106,43 @@ DATA_STATE = _raw_data_state
 
 SCOPES = ["https://www.googleapis.com/auth/webmasters"]
 
+
+def _fix_newlines_in_json_strings(s: str) -> str:
+    """Re-escape actual newline characters that appear inside JSON string values.
+
+    Cloudflare container env vars convert ``\\n`` escape sequences in JSON to
+    literal newline characters (0x0A).  This is fine *between* JSON tokens
+    (whitespace), but breaks JSON strings such as ``private_key`` whose value
+    legitimately contains ``\\n``.  This function walks the raw text, tracks
+    whether the current position is inside a quoted string, and replaces only
+    the newlines that appear inside strings with the two-character ``\\n``
+    escape so that ``json.loads`` can parse the result.
+    """
+    result: list[str] = []
+    in_string = False
+    i = 0
+    length = len(s)
+    while i < length:
+        c = s[i]
+        if c == '\\' and in_string:
+            # Escaped character — emit both the backslash and next char as-is.
+            result.append(c)
+            if i + 1 < length:
+                i += 1
+                result.append(s[i])
+        elif c == '"':
+            in_string = not in_string
+            result.append(c)
+        elif c == '\n' and in_string:
+            result.append('\\n')
+        elif c == '\r' and in_string:
+            result.append('\\r')
+        else:
+            result.append(c)
+        i += 1
+    return ''.join(result)
+
+
 def get_gsc_service():
     """
     Returns an authorized Search Console service object.
@@ -128,7 +181,28 @@ def get_gsc_service():
             logging.warning("OAuth authentication failed: %s", e)
             pass
     
-    # Try service account authentication
+    # Primary path for Docker/Cloudflare: read GSC_CREDENTIALS_JSON at call time.
+    # More robust than the module-load temp-file path because it re-reads the env var
+    # and uses from_service_account_info() which bypasses the filesystem entirely,
+    # avoiding newline/encoding issues when JSON is passed through container env vars.
+    _creds_json_str = os.environ.get("GSC_CREDENTIALS_JSON", "").strip()
+    if _creds_json_str:
+        try:
+            try:
+                _creds_info = json.loads(_creds_json_str)
+            except json.JSONDecodeError:
+                # Cloudflare container env vars convert \n escape sequences to
+                # real newlines, breaking JSON strings like private_key.
+                _creds_info = json.loads(_fix_newlines_in_json_strings(_creds_json_str))
+            creds = service_account.Credentials.from_service_account_info(
+                _creds_info, scopes=SCOPES
+            )
+            return build("searchconsole", "v1", credentials=creds, cache_discovery=False)
+        except Exception as e:
+            logging.warning("GSC_CREDENTIALS_JSON parse/auth failed: %s", e)
+            # Fall through to file-based service account methods
+
+    # Try service account authentication via file paths
     for cred_path in POSSIBLE_CREDENTIAL_PATHS:
         if cred_path and os.path.exists(cred_path):
             try:
@@ -232,6 +306,33 @@ def _site_not_found_error(site_url: str) -> str:
         "3. The authenticated account may not have access to this property."
     )
     return "\n".join(lines)
+
+
+@mcp.tool()
+async def debug_auth_state() -> str:
+    """DEBUG: Show current authentication environment state. Remove after debugging."""
+    creds_json = os.environ.get("GSC_CREDENTIALS_JSON", "")
+    creds_path = os.environ.get("GSC_CREDENTIALS_PATH", "")
+    skip_oauth = os.environ.get("GSC_SKIP_OAUTH", "")
+
+    def _is_valid_json(s: str) -> bool:
+        try:
+            json.loads(s)
+            return True
+        except Exception:
+            return False
+
+    return json.dumps({
+        "GSC_CREDENTIALS_JSON_length": len(creds_json),
+        "GSC_CREDENTIALS_JSON_first_50": creds_json[:50] if creds_json else "(empty)",
+        "GSC_CREDENTIALS_JSON_valid_json": _is_valid_json(creds_json),
+        "GSC_CREDENTIALS_PATH": creds_path,
+        "GSC_CREDENTIALS_PATH_exists": os.path.exists(creds_path) if creds_path else False,
+        "GSC_SKIP_OAUTH": skip_oauth,
+        "module_GSC_CREDENTIALS_PATH": GSC_CREDENTIALS_PATH,
+        "POSSIBLE_CREDENTIAL_PATHS": POSSIBLE_CREDENTIAL_PATHS,
+        "POSSIBLE_PATHS_exist": [os.path.exists(p) for p in POSSIBLE_CREDENTIAL_PATHS if p],
+    })
 
 
 @mcp.tool()
@@ -1657,7 +1758,7 @@ async def reauthenticate() -> str:
 
 
 def main():
-    """Entry point for the MCP server. Supports stdio (default) and SSE transports."""
+    """Entry point for the MCP server. Supports stdio, sse, and streamable-http transports."""
     transport = os.environ.get("MCP_TRANSPORT", "stdio").lower()
     host = os.environ.get("MCP_HOST", "127.0.0.1")
     try:
@@ -1667,12 +1768,21 @@ def main():
 
     if transport == "stdio":
         mcp.run(transport="stdio")
-    elif transport in {"sse", "http"}:
-        mcp.run(transport="sse", host=host, port=port)
+    elif transport in {"sse", "http", "streamable-http"}:
+        mcp.settings.host = host
+        mcp.settings.port = port
+        # Disable DNS rebinding protection so requests with non-localhost
+        # Host headers (e.g. from Cloudflare Workers) are not rejected.
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False
+        )
+        # Use streamable-http for "http" and "streamable-http"; SSE for "sse"
+        actual_transport = "streamable-http" if transport in {"http", "streamable-http"} else "sse"
+        mcp.run(transport=actual_transport)
     else:
         raise ValueError(
             f"Unknown MCP_TRANSPORT '{transport}'. "
-            "Use 'stdio' (default) or 'sse'."
+            "Use 'stdio' (default), 'sse', or 'streamable-http'."
         )
 
 

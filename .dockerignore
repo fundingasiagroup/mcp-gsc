@@ -1,16 +1,47 @@
-# Credential files — never bake secrets into the image
+# Credentials — NEVER bake into the image
 token.json
 client_secrets.json
-service_account_credentials.json
+client_secret*.json
+service_account*.json
+credentials.json
+*.pem
+*.key
+
+# Environment files
+.env
+*.env
+
+# Git and IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+.claude-plugin
+.cursor-plugin
+
+# Python artifacts
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.venv/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Cloudflare config (not needed inside container)
+wrangler.json
+worker.js
+package*.json
+node_modules/
 
 # Internal planning files
 FORK_ANALYSIS.md
 MCP_LEARNINGS.md
 fork-review.html
 
-# Python cache
-*.pyc
-__pycache__/
-*.egg-info/
-dist/
-.venv/
+# Lock files (uv sync recreates in container)
+uv.lock
